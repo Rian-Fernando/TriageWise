@@ -33,6 +33,7 @@ export interface TicketResult {
   requiresApproval: boolean;
   resolution: string;
   kbScore: number;
+  kbBackend: "supabase" | "memory";
   optimizedUsd: number;
   naiveUsd: number;
   savedUsd: number;
@@ -96,6 +97,7 @@ export async function triageTicket(ticket: Ticket): Promise<TicketResult> {
     requiresApproval,
     resolution,
     kbScore: Number(kb.score.toFixed(2)),
+    kbBackend: kb.backend,
     optimizedUsd,
     naiveUsd,
     savedUsd: naiveUsd - optimizedUsd,
@@ -106,6 +108,7 @@ export interface RunResult {
   mode: "LIVE" | "DEMO";
   cheapModel: string;
   claudeModel: string;
+  kbBackend: "supabase" | "memory";
   tickets: TicketResult[];
   totals: {
     naiveUsd: number;
@@ -131,6 +134,7 @@ export async function runAll(): Promise<RunResult> {
     mode: mode(),
     cheapModel: CHEAP_MODEL,
     claudeModel: CLAUDE_MODEL,
+    kbBackend: tickets[0]?.kbBackend ?? "memory",
     tickets,
     totals: {
       naiveUsd,

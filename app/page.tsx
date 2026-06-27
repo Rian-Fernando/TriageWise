@@ -136,6 +136,11 @@ export default function Page() {
               <span className={`h-1.5 w-1.5 rounded-full ${isLive ? "bg-emerald-400" : "bg-amber-400"}`} />
               {data ? `${data.mode} MODE` : "LOADING"}
             </span>
+            {data && (
+              <span className="hidden items-center gap-1.5 rounded-full bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 ring-1 ring-inset ring-zinc-700 sm:inline-flex">
+                KB · {data.kbBackend === "supabase" ? "Supabase" : "in-memory"}
+              </span>
+            )}
             <button
               onClick={start}
               disabled={!data || phase === "running" || phase === "awaiting-approval"}
@@ -219,10 +224,20 @@ export default function Page() {
           ))}
         </section>
 
-        <footer className="mt-10 border-t border-zinc-800 pt-4 text-xs text-zinc-500">
-          Running in {data?.mode ?? "…"} mode. With no keys, TriageWise serves realistic canned
-          results so the full flow always runs. Set <code className="text-zinc-400">AI_GATEWAY_API_KEY</code> for
-          live model routing. Built on Vercel eve + AI Gateway, Anthropic Claude, Supabase (pgvector KB).
+        <footer className="mt-10 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-800 pt-4 text-xs text-zinc-500">
+          <span>
+            Models: {data?.mode ?? "…"} · Knowledge base:{" "}
+            {data?.kbBackend === "supabase" ? "Supabase (live)" : "in-memory"}. Built on Vercel eve +
+            AI Gateway, Anthropic Claude, and Supabase.
+          </span>
+          <a
+            href="https://rianfernando.com"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-medium text-zinc-400 transition hover:text-emerald-400"
+          >
+            Built by Rian Fernando ↗
+          </a>
         </footer>
       </div>
     </main>

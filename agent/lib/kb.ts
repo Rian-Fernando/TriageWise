@@ -1,10 +1,14 @@
 /**
- * Seeded IT knowledge base + similarity search.
+ * IT knowledge base + similarity search.
  *
- * Default backend is in-memory with deterministic lexical (TF cosine)
- * similarity — no keys, no network, always runs, and good enough to recognize
- * repeat tickets (the cache-hit story). If SUPABASE_* env vars are present a
- * pgvector backend is attempted and falls back to in-memory on any error.
+ * Two backends, same deterministic scoring:
+ *  - "supabase": when SUPABASE_URL + a key are set, KB entries are fetched live
+ *    from Supabase Postgres (the `kb_entries` table). This is the production path.
+ *  - "memory":   otherwise (or on any Supabase error), the seeded in-memory
+ *    entries below are used — so the app always runs.
+ *
+ * Similarity is a deterministic lexical (TF cosine) match in-app, which keeps the
+ * cache-hit behavior identical across backends.
  */
 
 export type Category = "network" | "account" | "hardware" | "software";
@@ -17,7 +21,7 @@ export interface KbEntry {
   resolution: string;
 }
 
-/** High-frequency, already-known IT issues. Repeat tickets match these. */
+/** Seed for the in-memory backend and the Supabase migration (supabase/schema.sql). */
 export const KB_ENTRIES: KbEntry[] = [
   {
     id: "kb-password-reset",
@@ -108,10 +112,9 @@ function cosine(a: Map<string, number>, b: Map<string, number>): number {
   return denom === 0 ? 0 : dot / denom;
 }
 
-const ENTRY_VECS = KB_ENTRIES.map((e) => ({
-  entry: e,
-  vec: termFreq(tokenize(e.match)),
-}));
+type EntryVec = { entry: KbEntry; vec: Map<string, number> };
+const vecsFor = (entries: KbEntry[]): EntryVec[] =>
+  entries.map((e) => ({ entry: e, vec: termFreq(tokenize(e.match)) }));
 
 /** A score at/above this counts as a cache hit. Tuned so common repeats match
  *  and novel/hard tickets (kernel panics, outages) do not. */
@@ -123,43 +126,63 @@ export interface KbResult {
   entry: KbEntry | null;
 }
 
-/** In-memory lexical search — the always-on default path. */
-export function searchKbLexical(text: string): KbResult {
+function searchOver(text: string, entryVecs: EntryVec[]): KbResult {
   const q = termFreq(tokenize(text));
   let best: KbResult = { hit: false, score: 0, entry: null };
-  for (const { entry, vec } of ENTRY_VECS) {
+  for (const { entry, vec } of entryVecs) {
     const score = cosine(q, vec);
     if (score > best.score) best = { hit: score >= KB_HIT_THRESHOLD, score, entry };
   }
   return best;
 }
 
-/**
- * Public search entry point. Uses Supabase pgvector when SUPABASE_* is set and
- * reachable; otherwise (and on any error) falls back to in-memory lexical search
- * so the demo never breaks.
- */
-export async function searchKb(text: string): Promise<KbResult & { backend: "pgvector" | "memory" }> {
-  if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
-    try {
-      const pg = await searchKbPgvector(text);
-      if (pg) return { ...pg, backend: "pgvector" };
-    } catch {
-      // fall through to lexical
-    }
+const MEMORY_VECS = vecsFor(KB_ENTRIES);
+
+/** In-memory backend — always available. */
+export function searchKbLexical(text: string): KbResult {
+  return searchOver(text, MEMORY_VECS);
+}
+
+// ---------------------------------------------------------------------------
+// Supabase backend (live KB store)
+// ---------------------------------------------------------------------------
+
+function supabaseKey(): string | undefined {
+  return process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
+}
+
+let supabaseVecs: Promise<EntryVec[]> | null = null;
+
+async function getSupabaseVecs(): Promise<EntryVec[]> {
+  if (!supabaseVecs) {
+    supabaseVecs = (async () => {
+      const key = supabaseKey()!;
+      const url = `${process.env.SUPABASE_URL}/rest/v1/kb_entries?select=id,category,match,resolution`;
+      const res = await fetch(url, {
+        headers: { apikey: key, Authorization: `Bearer ${key}` },
+      });
+      if (!res.ok) throw new Error(`Supabase kb_entries ${res.status}`);
+      const rows = (await res.json()) as KbEntry[];
+      if (!Array.isArray(rows) || rows.length === 0) throw new Error("kb_entries empty");
+      return vecsFor(rows);
+    })();
   }
-  return { ...searchKbLexical(text), backend: "memory" };
+  return supabaseVecs;
 }
 
 /**
- * Supabase pgvector backend (wired, optional). Requires a `kb_entries` table
- * with an `embedding vector` column and a `match_kb` RPC. Returns null to signal
- * "not configured / unavailable" so the caller falls back to lexical search.
- * Kept dependency-light via dynamic import so the app builds without Supabase.
+ * Public search entry point. Uses Supabase when configured and reachable,
+ * otherwise (and on any error) falls back to the in-memory backend.
  */
-async function searchKbPgvector(_text: string): Promise<KbResult | null> {
-  // Intentionally minimal: a real deployment would embed `_text`, call the
-  // `match_kb` RPC, and map the top row to a KbResult. Until a database is
-  // provisioned this returns null and the lexical backend handles the query.
-  return null;
+export async function searchKb(
+  text: string,
+): Promise<KbResult & { backend: "supabase" | "memory" }> {
+  if (process.env.SUPABASE_URL && supabaseKey()) {
+    try {
+      return { ...searchOver(text, await getSupabaseVecs()), backend: "supabase" };
+    } catch {
+      supabaseVecs = null; // let it retry on a later run
+    }
+  }
+  return { ...searchKbLexical(text), backend: "memory" };
 }
