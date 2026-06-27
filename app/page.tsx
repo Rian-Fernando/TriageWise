@@ -7,6 +7,8 @@ const REVEAL_MS = 420; // staged reveal cadence — also the DEMO "thinking" del
 
 const money = (n: number, d = 4) => `$${n.toFixed(d)}`;
 
+type NotifyState = { sent: boolean; simulated: boolean; to: string | null; detail: string };
+
 const PATH_STYLE: Record<Path, string> = {
   kb: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   cheap: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
@@ -39,6 +41,7 @@ export default function Page() {
   const [phase, setPhase] = useState<"idle" | "running" | "awaiting-approval" | "done">("idle");
   const [shown, setShown] = useState(0); // tickets visible
   const [decision, setDecision] = useState<"pending" | "approved" | "denied">("pending");
+  const [notify, setNotify] = useState<NotifyState | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load the run once on mount (ready to play on click).
@@ -69,7 +72,6 @@ export default function Page() {
     timer.current = setTimeout(() => {
       const next = data.tickets[shown];
       setShown(shown + 1);
-      // Pause on a ticket that needs approval until a human decides.
       if (next.requiresApproval && decision === "pending") {
         setPhase("awaiting-approval");
       } else if (shown + 1 >= total) {
@@ -83,13 +85,38 @@ export default function Page() {
     clearTimer();
     setShown(0);
     setDecision("pending");
+    setNotify(null);
     setPhase("running");
   }, []);
 
-  const decide = useCallback((d: "approved" | "denied") => {
-    setDecision(d);
-    setPhase("running"); // resume the queue
-  }, []);
+  const decide = useCallback(
+    (d: "approved" | "denied") => {
+      setDecision(d);
+      setPhase("running"); // resume the queue
+      if (d === "approved" && data) {
+        const p1 = data.tickets.find((t) => t.requiresApproval);
+        if (p1) {
+          fetch("/api/notify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: p1.id,
+              subject: p1.subject,
+              priority: p1.priority,
+              requester: p1.requester,
+              resolution: p1.resolution,
+            }),
+          })
+            .then((r) => r.json())
+            .then(setNotify)
+            .catch(() =>
+              setNotify({ sent: false, simulated: true, to: null, detail: "notify unavailable" }),
+            );
+        }
+      }
+    },
+    [data],
+  );
 
   const visible = data ? data.tickets.slice(0, shown) : [];
 
@@ -220,6 +247,7 @@ export default function Page() {
               pending={t.requiresApproval && decision === "pending"}
               decision={t.requiresApproval ? decision : "pending"}
               onDecide={decide}
+              notify={t.requiresApproval ? notify : null}
             />
           ))}
         </section>
@@ -228,7 +256,7 @@ export default function Page() {
           <span>
             Models: {data?.mode ?? "…"} · Knowledge base:{" "}
             {data?.kbBackend === "supabase" ? "Supabase (live)" : "in-memory"}. Built on Vercel eve +
-            AI Gateway, Anthropic Claude, and Supabase.
+            AI Gateway, Anthropic Claude, Supabase, and Resend.
           </span>
           <a
             href="https://rianfernando.com"
@@ -276,12 +304,15 @@ function TicketRow({
   pending,
   decision,
   onDecide,
+  notify,
 }: {
   ticket: TicketResult;
   pending: boolean;
   decision: "pending" | "approved" | "denied";
   onDecide: (d: "approved" | "denied") => void;
+  notify: NotifyState | null;
 }) {
+  const escalateApproved = t.path === "escalate" && decision === "approved";
   return (
     <div
       className={`rounded-xl border p-3 transition ${
@@ -308,9 +339,7 @@ function TicketRow({
         </div>
         <div className="shrink-0 text-right">
           <div className="font-mono text-sm tabular-nums text-zinc-200">{money(t.optimizedUsd, 5)}</div>
-          <div className="text-[11px] text-zinc-500">
-            vs {money(t.naiveUsd, 4)} naive
-          </div>
+          <div className="text-[11px] text-zinc-500">vs {money(t.naiveUsd, 4)} naive</div>
         </div>
       </div>
 
@@ -336,13 +365,23 @@ function TicketRow({
             </button>
           </div>
         </div>
+      ) : escalateApproved ? (
+        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+          ✓ Approved — on-call paged, Sev-1 bridge opened.
+          {notify ? (
+            <span className={notify.sent ? "text-emerald-300" : "text-zinc-500"}>
+              {" "}
+              · 📧 {notify.sent ? notify.detail : notify.simulated ? "requester email simulated" : notify.detail}
+            </span>
+          ) : (
+            <span className="text-zinc-500"> · 📧 notifying requester…</span>
+          )}
+        </p>
       ) : (
         <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-zinc-400">
-          {t.path === "escalate" && decision === "approved"
-            ? "✓ Approved — on-call paged, Sev-1 bridge opened."
-            : t.path === "escalate" && decision === "denied"
-              ? "Escalation denied — kept open for manual handling."
-              : t.resolution}
+          {t.path === "escalate" && decision === "denied"
+            ? "Escalation denied — kept open for manual handling."
+            : t.resolution}
         </p>
       )}
     </div>

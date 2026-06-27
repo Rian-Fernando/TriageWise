@@ -8,6 +8,8 @@ cache, and spending Claude only on the genuinely hard, novel ones.
 > On the 12 sample tickets: **$0.055 → $0.004, ~93% cheaper.**
 > Projected at 1,000 tickets/day: **~$139/mo → ~$10/mo.**
 
+**▶ Live demo: [triagewise.rianfernando.com](https://triagewise.rianfernando.com)**
+
 The hero is a live **side-by-side naive-vs-optimized cost meter**, with a human-approval
 gate on P1 escalations (eve's built-in HITL guardrail) and a **Supabase-backed knowledge base**.
 
@@ -37,6 +39,7 @@ No keys needed — it runs in **DEMO mode** out of the box. A **LIVE vs DEMO** b
 | `ANTHROPIC_API_KEY` | Alternative LIVE credential (Claude direct). |
 | `TRIAGEWISE_CHEAP_MODEL` | Override the cheap/fast model (default `meta/llama-3.1-8b`). |
 | `SUPABASE_URL` + `SUPABASE_ANON_KEY` | **Live Supabase KB** — the app fetches `kb_entries` from your Supabase Postgres. Falls back to in-memory automatically. |
+| `RESEND_API_KEY` + `NOTIFY_DEMO_RECIPIENT` | Send a **real status email** on P1 approval (else simulated). |
 
 Any failed model/DB call falls back per-call, so the run never aborts mid-stage.
 Copy `.env.example` → `.env.local` and fill in what you want (it's gitignored).
@@ -99,7 +102,7 @@ it's always live during judging.
    Redeploy.
 
 - **Repo:** https://github.com/Rian-Fernando/TriageWise
-- **Live:** _(add your Vercel / custom-domain URL here)_
+- **Live:** https://triagewise.rianfernando.com
 
 ---
 
@@ -136,7 +139,7 @@ How a production TriageWise uses all six sponsors. **Built** = in this repo;
 | **Anthropic** | Claude `diagnose` subagent for hard tickets; prompt caching on the system prompt | **Built** (subagent); caching noted |
 | **Supabase** | **Live knowledge-base store** (`kb_entries`); ticket store + pgvector are the next step | **Built** (live KB; pgvector-ready) |
 | **Sentry** | OpenTelemetry trace export; *bonus:* Sentry alerts auto-open tickets | **Architected** (next) |
-| **Resend** | Email the requester on status changes (resolved/escalated) | **Architected** (next) |
+| **Resend** | Status email to the requester on P1 escalation approval (env-gated) | **Built** |
 | **Auth0** | Role-based auth — IT-staff vs requester; approval gate restricted to staff. See [auth0/agent-skills](https://github.com/auth0/agent-skills) | **Architected** (next) |
 
 ---
@@ -146,7 +149,7 @@ How a production TriageWise uses all six sponsors. **Built** = in this repo;
 1. **(0:00)** Open the live URL. Point at the **DEMO MODE** + **KB · Supabase** badges.
 2. **(0:10)** Press **Run triage**. Tickets stream in — call out the green **KB CACHE HIT** rows ("repeat tickets resolved from the Supabase KB at ~$0").
 3. **(0:30)** Two **Claude** rows light up purple — "only the hard, novel tickets pay for the smart model."
-4. **(0:45)** It **pauses on the P1** ("production DB down"). Click **Approve & page on-call** — eve's human-in-the-loop guardrail; the run resumes.
+4. **(0:45)** It **pauses on the P1** ("production DB down"). Click **Approve & page on-call** — eve's human-in-the-loop guardrail fires a real Resend status email, then the run resumes.
 5. **(1:00)** Land on the hero: **~93% cheaper**, **~$139/mo → ~$10/mo** at scale.
 6. **(1:20)** "Cheap model + Supabase KB cache for the easy 80%, Claude only when it counts — on Vercel eve + AI Gateway."
 
@@ -154,8 +157,8 @@ How a production TriageWise uses all six sponsors. **Built** = in this repo;
 
 ## Tech used
 
-Vercel (eve, AI Gateway), Anthropic Claude, Supabase (Postgres KB), Next.js, TypeScript,
-Zod, AI SDK. *(Architected next: Sentry, Resend, Auth0.)*
+Vercel (eve, AI Gateway), Anthropic Claude, Supabase (Postgres KB), Resend, Next.js,
+TypeScript, Zod, AI SDK. *(Architected next: Sentry, Auth0.)*
 
 ## Notes / scope
 
