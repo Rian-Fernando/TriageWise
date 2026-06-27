@@ -159,7 +159,7 @@ How a production TriageWise uses all six sponsors. **Built** = in this repo;
 | Sponsor | Use | Status |
 | --- | --- | --- |
 | **Vercel** | eve framework, **AI Gateway** model routing, Sandbox, Agent Runs observability | **Built** (eve + AI Gateway) |
-| **Anthropic** | Claude `diagnose` subagent for hard tickets; prompt caching on the system prompt | **Built** (subagent); caching noted |
+| **Anthropic** | Claude `diagnose` subagent for hard/novel ticket diagnosis, routed via the AI Gateway | **Built** |
 | **Supabase** | **Live knowledge-base store** (`kb_entries`); ticket store + pgvector are the next step | **Built** (live KB; pgvector-ready) |
 | **Sentry** | OpenTelemetry trace export; *bonus:* Sentry alerts auto-open tickets | **Architected** — see below |
 | **Resend** | Status email to the requester on P1 escalation approval (env-gated) | **Built** |
@@ -205,8 +205,8 @@ how it plugs into the existing pipeline.
 1. **(0:00)** Open the live URL. Point at the **DEMO MODE** + **KB · Supabase** badges.
 2. **(0:10)** Press **Run triage**. Tickets stream in — call out the green **KB CACHE HIT** rows ("repeat tickets resolved from the Supabase KB at ~$0").
 3. **(0:30)** Two **Claude** rows light up purple — "only the hard, novel tickets pay for the smart model."
-4. **(0:45)** It **pauses on the P1** ("production DB down"). Click **Approve & page on-call** — eve's human-in-the-loop guardrail fires a real Resend status email, then the run resumes.
-5. **(1:00)** Land on the hero: **~93% cheaper**, **~$139/mo → ~$10/mo** at scale.
+4. **(0:45)** It **pauses on the P1 outage**. Click **Approve & page on-call** — eve's human-in-the-loop guardrail fires a Resend status email, then the run resumes.
+5. **(1:00)** Land on the hero: **~90%+ cheaper**, **~$140/mo → ~$10/mo** at scale.
 6. **(1:20)** "Cheap model + Supabase KB cache for the easy 80%, Claude only when it counts — on Vercel eve + AI Gateway."
 
 ---
