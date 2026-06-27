@@ -75,6 +75,8 @@ export default function Page() {
   const [shown, setShown] = useState(0);
   const [decision, setDecision] = useState<"pending" | "approved" | "denied">("pending");
   const [notify, setNotify] = useState<NotifyState | null>(null);
+  const [reminderMsg, setReminderMsg] = useState<string | null>(null);
+  const [reminding, setReminding] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -111,10 +113,19 @@ export default function Page() {
 
   const start = useCallback(() => {
     clearTimer();
+    setData(null); // re-fetch a fresh sampled batch each run (varied outputs)
     setShown(0);
     setDecision("pending");
     setNotify(null);
+    setReminderMsg(null);
     setPhase("running");
+    fetch("/api/run", { method: "POST" })
+      .then((r) => r.json())
+      .then((d: RunResult) => setData(d))
+      .catch(() => {
+        setError("Could not reach the pipeline. Refresh to retry.");
+        setPhase("idle");
+      });
   }, []);
 
   const decide = useCallback(
@@ -145,6 +156,29 @@ export default function Page() {
     },
     [data],
   );
+
+  const reminders = useMemo(() => (data ? data.tickets.filter((t) => t.reminder) : []), [data]);
+
+  const sendReminders = useCallback(() => {
+    if (reminders.length === 0) return;
+    setReminding(true);
+    fetch("/api/notify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "reminder",
+        items: reminders.map((t) => ({ requester: t.requester, reminder: t.reminder ?? "" })),
+      }),
+    })
+      .then((r) => r.json())
+      .then((res: NotifyState) =>
+        setReminderMsg(
+          res.sent ? res.detail : res.simulated ? "Simulated — add RESEND keys to send" : res.detail,
+        ),
+      )
+      .catch(() => setReminderMsg("Reminder send failed"))
+      .finally(() => setReminding(false));
+  }, [reminders]);
 
   const visible = data ? data.tickets.slice(0, shown) : [];
   const counted = useMemo(
@@ -295,6 +329,30 @@ export default function Page() {
           )}
         </motion.section>
 
+        {data && reminders.length > 0 && (
+          <motion.div
+            layout
+            className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/[0.02] px-4 py-2.5 text-xs"
+          >
+            <span className="text-zinc-400">
+              🔔 {reminders.length} user{reminders.length === 1 ? "" : "s"} have follow-up reminders
+              (e.g. enroll in the password manager)
+            </span>
+            <div className="flex items-center gap-2">
+              {reminderMsg && <span className="text-emerald-300">{reminderMsg}</span>}
+              <motion.button
+                whileHover={{ scale: 1.04 }}
+                whileTap={{ scale: 0.96 }}
+                onClick={sendReminders}
+                disabled={reminding}
+                className="rounded-lg bg-white/10 px-3 py-1 font-semibold text-zinc-100 hover:bg-white/20 disabled:opacity-50"
+              >
+                {reminding ? "Sending…" : "Send via Resend ▸"}
+              </motion.button>
+            </div>
+          </motion.div>
+        )}
+
         {/* Ticket stream */}
         <div className="mt-10">
           <SectionLabel index="01">Triage stream</SectionLabel>
@@ -423,6 +481,25 @@ function TicketRow({
           <div className="font-mono text-[11px] text-zinc-600">vs {money(t.naiveUsd, 4)}</div>
         </div>
       </div>
+
+      {(t.actions.length > 0 || t.reminder) && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+          {t.actions.map((a, i) => (
+            <span
+              key={i}
+              className="inline-flex items-center gap-1 rounded-md bg-white/[0.03] px-1.5 py-0.5 text-[10px] text-zinc-400 ring-1 ring-inset ring-white/5"
+            >
+              <span className="text-emerald-500/70">✓</span>
+              {a}
+            </span>
+          ))}
+          {t.reminder && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300 ring-1 ring-inset ring-emerald-500/25">
+              🔔 {t.reminder}
+            </span>
+          )}
+        </div>
+      )}
 
       <AnimatePresence mode="wait" initial={false}>
         {pending ? (

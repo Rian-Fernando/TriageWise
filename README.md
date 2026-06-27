@@ -5,8 +5,9 @@ It triages, resolves, and escalates support tickets while cutting LLM cost ~90% 
 routing the easy, repetitive 80% of tickets to a cheap open model + a knowledge-base
 cache, and spending Claude only on the genuinely hard, novel ones.
 
-> On the 12 sample tickets: **$0.055 → $0.004, ~93% cheaper.**
-> Projected at 1,000 tickets/day: **~$139/mo → ~$10/mo.**
+> On a typical batch: **~$0.05 → ~$0.004, ~90%+ cheaper.** Each run samples a fresh mix
+> of tickets, so the exact numbers shift.
+> Projected at 1,000 tickets/day: **~$140/mo → ~$10/mo.**
 
 **▶ Live demo: [triagewise.rianfernando.com](https://triagewise.rianfernando.com)**
 
@@ -69,6 +70,28 @@ exposes the same capabilities natively (`npm exec -- eve dev`).
 
 > **Model id note:** AI Gateway slugs use a **dot** (`anthropic/claude-sonnet-4.6`).
 > The hyphen form (`claude-sonnet-4-6`) is only for the direct Anthropic SDK.
+
+**Fresh batch each run.** Every run samples ~12 tickets from a larger pool, so the mix
+(and the savings number) changes each time — a quick way to show it holds up across
+scenarios. **Replay** re-runs with a new sample.
+
+---
+
+## Does it actually call Claude? (LIVE vs DEMO)
+
+Yes — the LIVE path is real and already in the code. With **no** model credential the app
+serves deterministic **DEMO** data (canned classifications/resolutions) so it always runs.
+Add a credential and the same pipeline calls the **cheap model** (classify + easy/medium)
+and **Claude** (hard tickets) through the Vercel AI Gateway, with real token usage driving
+the cost meter.
+
+- **Locally:** put `AI_GATEWAY_API_KEY=...` (a Vercel AI Gateway key) in `.env.local`.
+- **On Vercel:** add `AI_GATEWAY_API_KEY` in project env, or enable AI Gateway and let
+  project **OIDC** authenticate automatically.
+
+The header badge is **truthful**: it reads **LIVE** only when a real model call actually
+succeeded this run, and **DEMO** otherwise (including when a call was configured but fell
+back to canned). So if it says LIVE, those answers came from Claude / the cheap model.
 
 ---
 
@@ -138,9 +161,42 @@ How a production TriageWise uses all six sponsors. **Built** = in this repo;
 | **Vercel** | eve framework, **AI Gateway** model routing, Sandbox, Agent Runs observability | **Built** (eve + AI Gateway) |
 | **Anthropic** | Claude `diagnose` subagent for hard tickets; prompt caching on the system prompt | **Built** (subagent); caching noted |
 | **Supabase** | **Live knowledge-base store** (`kb_entries`); ticket store + pgvector are the next step | **Built** (live KB; pgvector-ready) |
-| **Sentry** | OpenTelemetry trace export; *bonus:* Sentry alerts auto-open tickets | **Architected** (next) |
+| **Sentry** | OpenTelemetry trace export; *bonus:* Sentry alerts auto-open tickets | **Architected** — see below |
 | **Resend** | Status email to the requester on P1 escalation approval (env-gated) | **Built** |
-| **Auth0** | Role-based auth — IT-staff vs requester; approval gate restricted to staff. See [auth0/agent-skills](https://github.com/auth0/agent-skills) | **Architected** (next) |
+| **Auth0** | Role-based auth — IT-staff vs requester; approval gate restricted to staff. See [auth0/agent-skills](https://github.com/auth0/agent-skills) | **Architected** — see below |
+
+---
+
+## Planned integrations: Sentry & Auth0
+
+Intentionally left as the next build (not wired yet) — here's exactly why each belongs and
+how it plugs into the existing pipeline.
+
+### Sentry — observability for the triage loop
+- **Why:** once tickets auto-route, you need to see *what the agent did* and catch
+  regressions (a model returning junk, a tool throwing, latency creeping up). A cost-routing
+  agent without tracing is a black box.
+- **Use:** every `/api/run` and each eve agent turn becomes a Sentry trace — spans for
+  classify → KB lookup → resolve/diagnose → escalate, with token usage and the chosen path
+  as attributes. Failed model/DB calls surface with context instead of silently falling back.
+- **How it plugs in:** eve exposes `agent/instrumentation.ts` (OpenTelemetry); Sentry is an
+  OTLP destination, so it's config + a DSN. For the web pipeline, wrap `runAll()` in a span
+  and `captureException` on the per-call catches already in `triage.ts` / `kb.ts`.
+  *Bonus:* a Sentry alert webhook can call the agent to auto-open a ticket for a new
+  production error — closing the loop from "incident detected" to "triaged."
+- **Needs:** a Sentry **DSN**.
+
+### Auth0 — role-based access for IT staff
+- **Why:** **Approve & page on-call** is a privileged action. In production only IT staff
+  should approve escalations; requesters should only file/track their own tickets.
+- **Use:** the public dashboard stays open, but clicking **Approve** prompts an Auth0 login
+  and checks an `it-staff` role before the escalation fires — a real RBAC moment layered on
+  eve's human-in-the-loop gate.
+- **How it plugs in:** `@auth0/nextjs-auth0` protects the approve route and gates the button;
+  eve's route protection (`vercelOidc()` / a custom `AuthFn`) secures the agent's own routes.
+  The [auth0/agent-skills](https://github.com/auth0/agent-skills) patterns cover the token
+  vault + on-behalf-of calls for agents acting per-user.
+- **Needs:** Auth0 **domain**, **client ID/secret**, callback `…/api/auth/callback`.
 
 ---
 
@@ -165,4 +221,5 @@ TypeScript, Zod, AI SDK. *(Architected next: Sentry, Auth0.)*
 - KB similarity is a deterministic in-app lexical match over entries from Supabase (or the
   in-memory seed). pgvector embeddings are a planned upgrade.
 - Lifecycle is intentionally minimal: `new → triaged → resolved | escalated`.
-- DEMO numbers are deterministic; LIVE costs come from real gateway token usage.
+- Each run samples a fresh ~12-ticket batch from a 22-ticket pool, so outputs vary run to run.
+- DEMO token counts are deterministic per ticket; LIVE costs come from real gateway usage.
